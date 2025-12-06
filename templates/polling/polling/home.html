@@ -1,0 +1,409 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Polling Verification System</title>
+    <link rel="stylesheet" href="/static/css/style.css">
+    <style>
+        .verification-container {
+            max-width: 1200px;
+            margin: 40px auto;
+            padding: 20px;
+        }
+
+        .step-card {
+            background: white;
+            border-radius: 12px;
+            padding: 30px;
+            margin-bottom: 20px;
+            box-shadow: 0 4px 15px rgba(0, 0, 0, 0.1);
+        }
+
+        .step-header {
+            display: flex;
+            align-items: center;
+            gap: 15px;
+            margin-bottom: 20px;
+        }
+
+        .step-number {
+            background: var(--primary-pink);
+            color: white;
+            width: 40px;
+            height: 40px;
+            border-radius: 50%;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-weight: bold;
+            font-size: 20px;
+        }
+
+        .voter-details {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 15px;
+            margin: 20px 0;
+        }
+
+        .detail-item {
+            padding: 10px;
+            background: #f9f9f9;
+            border-radius: 6px;
+        }
+
+        .detail-label {
+            font-weight: bold;
+            color: #666;
+            font-size: 12px;
+            text-transform: uppercase;
+        }
+
+        .detail-value {
+            color: #333;
+            font-size: 16px;
+            margin-top: 5px;
+        }
+
+        .camera-container {
+            display: flex;
+            gap: 20px;
+            justify-content: center;
+            align-items: center;
+            margin: 20px 0;
+        }
+
+        .camera-box {
+            text-align: center;
+        }
+
+        .camera-box video,
+        .camera-box img,
+        .camera-box canvas {
+            width: 320px;
+            height: 240px;
+            border-radius: 12px;
+            border: 3px solid #ddd;
+        }
+
+        .verification-result {
+            text-align: center;
+            padding: 40px;
+            border-radius: 12px;
+            margin: 20px 0;
+        }
+
+        .result-verified {
+            background: linear-gradient(135deg, #00ff9d 0%, #00d4ff 100%);
+            color: white;
+        }
+
+        .result-failed {
+            background: linear-gradient(135deg, #ff0055 0%, #ff6b6b 100%);
+            color: white;
+        }
+
+        .result-icon {
+            font-size: 80px;
+            margin-bottom: 20px;
+        }
+
+        .result-text {
+            font-size: 32px;
+            font-weight: bold;
+            margin-bottom: 10px;
+        }
+
+        .confidence-score {
+            font-size: 18px;
+            opacity: 0.9;
+        }
+
+        .hidden {
+            display: none;
+        }
+
+        .loading {
+            text-align: center;
+            padding: 20px;
+        }
+
+        .spinner {
+            border: 4px solid #f3f3f3;
+            border-top: 4px solid var(--primary-pink);
+            border-radius: 50%;
+            width: 40px;
+            height: 40px;
+            animation: spin 1s linear infinite;
+            margin: 0 auto;
+        }
+
+        @keyframes spin {
+            0% {
+                transform: rotate(0deg);
+            }
+
+            100% {
+                transform: rotate(360deg);
+            }
+        }
+    </style>
+</head>
+
+<body>
+    <div class="top-bar">
+        <div class="contact-info">
+            <span>🗳️ Polling Verification System</span>
+        </div>
+        <div class="auth-links">
+            <span>Poll Worker: {{ user.username }}</span>
+            <a href="/admin/logout/">🚪 Logout</a>
+        </div>
+    </div>
+
+    <div class="verification-container">
+        <h1 style="text-align: center; color: var(--primary-pink); margin-bottom: 40px;">
+            Voter Verification System
+        </h1>
+
+        <!-- Step 1: Enter NIC -->
+        <div class="step-card" id="step1">
+            <div class="step-header">
+                <div class="step-number">1</div>
+                <h2>Enter Voter NIC</h2>
+            </div>
+            <div class="form-group">
+                <label for="nic-input">SLIN / NIC</label>
+                <input type="text" id="nic-input" placeholder="Enter NIC number" style="font-size: 18px;">
+            </div>
+            <button class="btn btn-primary" onclick="searchVoter()" style="width: 100%;">
+                🔍 Search Voter
+            </button>
+            <div id="search-error" class="error hidden" style="margin-top: 15px;"></div>
+        </div>
+
+        <!-- Step 2: Voter Details -->
+        <div class="step-card hidden" id="step2">
+            <div class="step-header">
+                <div class="step-number">2</div>
+                <h2>Voter Details</h2>
+            </div>
+            <div class="voter-details" id="voter-details"></div>
+        </div>
+
+        <!-- Step 3: Face Verification -->
+        <div class="step-card hidden" id="step3">
+            <div class="step-header">
+                <div class="step-number">3</div>
+                <h2>Face Verification</h2>
+            </div>
+
+            <div class="camera-container">
+                <div class="camera-box">
+                    <h4>Registered Photo</h4>
+                    <img id="stored-photo" src="" alt="Stored Photo">
+                </div>
+                <div class="camera-box">
+                    <h4>Live Camera</h4>
+                    <video id="video" autoplay></video>
+                    <canvas id="canvas" class="hidden"></canvas>
+                </div>
+            </div>
+
+            <button class="btn btn-primary" onclick="captureAndVerify()" style="width: 100%; font-size: 18px;">
+                📸 Capture & Verify Face
+            </button>
+
+            <div id="face-loading" class="loading hidden">
+                <div class="spinner"></div>
+                <p>Verifying face... Please wait</p>
+            </div>
+        </div>
+
+        <!-- Step 4: Verification Result -->
+        <div class="step-card hidden" id="step4">
+            <div id="verification-result"></div>
+            <button class="btn btn-secondary" onclick="resetVerification()" style="width: 100%; margin-top: 20px;">
+                🔄 Verify Another Voter
+            </button>
+        </div>
+    </div>
+
+    <script>
+        let currentVoter = null;
+        const video = document.getElementById('video');
+        const canvas = document.getElementById('canvas');
+        const ctx = canvas.getContext('2d');
+
+        // Start camera
+        navigator.mediaDevices.getUserMedia({ video: true })
+            .then(stream => {
+                video.srcObject = stream;
+            })
+            .catch(err => {
+                console.error("Camera error:", err);
+                alert("Could not access camera");
+            });
+
+        async function searchVoter() {
+            const nic = document.getElementById('nic-input').value.trim();
+            const errorDiv = document.getElementById('search-error');
+
+            if (!nic) {
+                errorDiv.textContent = 'Please enter a NIC number';
+                errorDiv.classList.remove('hidden');
+                return;
+            }
+
+            errorDiv.classList.add('hidden');
+
+            try {
+                const response = await fetch('/polling/verify-nic/', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                        'X-CSRFToken': getCookie('csrftoken')
+                    },
+                    body: JSON.stringify({ nic })
+                });
+
+                const data = await response.json();
+
+                if (response.ok) {
+                    currentVoter = data.voter;
+                    displayVoterDetails(data.voter);
+                    document.getElementById('step2').classList.remove('hidden');
+                    document.getElementById('step3').classList.remove('hidden');
+                } else {
+                    errorDiv.textContent = data.error;
+                    errorDiv.classList.remove('hidden');
+                }
+            } catch (error) {
+                errorDiv.textContent = 'Error searching voter';
+                errorDiv.classList.remove('hidden');
+            }
+        }
+
+        function displayVoterDetails(voter) {
+            const detailsDiv = document.getElementById('voter-details');
+            detailsDiv.innerHTML = `
+                <div class="detail-item">
+                    <div class="detail-label">NIC</div>
+                    <div class="detail-value">${voter.nic}</div>
+                </div>
+                <div class="detail-item">
+                    <div class="detail-label">Name</div>
+                    <div class="detail-value">${voter.name}</div>
+                </div>
+                <div class="detail-item">
+                    <div class="detail-label">Date of Birth</div>
+                    <div class="detail-value">${voter.date_of_birth || 'N/A'}</div>
+                </div>
+                <div class="detail-item">
+                    <div class="detail-label">Gender</div>
+                    <div class="detail-value">${voter.gender || 'N/A'}</div>
+                </div>
+                <div class="detail-item">
+                    <div class="detail-label">Admin District</div>
+                    <div class="detail-value">${voter.admin_district || 'N/A'}</div>
+                </div>
+                <div class="detail-item">
+                    <div class="detail-label">Polling Division</div>
+                    <div class="detail-value">${voter.polling_division || 'N/A'}</div>
+                </div>
+            `;
+
+            // Display stored photo
+            if (voter.face_image) {
+                document.getElementById('stored-photo').src = voter.face_image;
+            }
+        }
+
+        async function captureAndVerify() {
+            // Capture photo
+            canvas.width = video.videoWidth;
+            canvas.height = video.videoHeight;
+            ctx.drawImage(video, 0, 0);
+            const liveImage = canvas.toDataURL('image/jpeg');
+
+            // Show loading
+            document.getElementById('face-loading').classList.remove('hidden');
+
+            try {
+                const response = await fetch('/polling/verify-face/', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                        'X-CSRFToken': getCookie('csrftoken')
+                    },
+                    body: JSON.stringify({
+                        nic: currentVoter.nic,
+                        live_image: liveImage
+                    })
+                });
+
+                const data = await response.json();
+                document.getElementById('face-loading').classList.add('hidden');
+
+                displayResult(data);
+                document.getElementById('step4').classList.remove('hidden');
+
+            } catch (error) {
+                document.getElementById('face-loading').classList.add('hidden');
+                alert('Error during face verification');
+            }
+        }
+
+        function displayResult(data) {
+            const resultDiv = document.getElementById('verification-result');
+
+            if (data.verified) {
+                resultDiv.innerHTML = `
+                    <div class="verification-result result-verified">
+                        <div class="result-icon">✅</div>
+                        <div class="result-text">VERIFIED</div>
+                        <div class="confidence-score">Confidence: ${data.confidence}%</div>
+                        <p style="margin-top: 20px;">${currentVoter.name} is authorized to vote</p>
+                    </div>
+                `;
+            } else {
+                resultDiv.innerHTML = `
+                    <div class="verification-result result-failed">
+                        <div class="result-icon">❌</div>
+                        <div class="result-text">NOT VERIFIED</div>
+                        <div class="confidence-score">${data.message}</div>
+                        <p style="margin-top: 20px;">Face does not match registered photo</p>
+                    </div>
+                `;
+            }
+        }
+
+        function resetVerification() {
+            document.getElementById('nic-input').value = '';
+            document.getElementById('step2').classList.add('hidden');
+            document.getElementById('step3').classList.add('hidden');
+            document.getElementById('step4').classList.add('hidden');
+            document.getElementById('search-error').classList.add('hidden');
+            currentVoter = null;
+        }
+
+        function getCookie(name) {
+            let cookieValue = null;
+            if (document.cookie && document.cookie !== '') {
+                const cookies = document.cookie.split(';');
+                for (let i = 0; i < cookies.length; i++) {
+                    const cookie = cookies[i].trim();
+                    if (cookie.substring(0, name.length + 1) === (name + '=')) {
+                        cookieValue = decodeURIComponent(cookie.substring(name.length + 1));
+                        break;
+                    }
+                }
+            }
+            return cookieValue;
+        }
+    </script>
+</body>
+
+</html>

@@ -1,0 +1,238 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Voter Verification</title>
+    <style>
+        body {
+            background-color: #1a1a1a;
+            color: #fff;
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            height: 100vh;
+            margin: 0;
+        }
+
+        .container {
+            position: relative;
+            width: 640px;
+            height: 480px;
+            border: 2px solid #00ffcc;
+            border-radius: 10px;
+            overflow: hidden;
+            box-shadow: 0 0 20px rgba(0, 255, 204, 0.5);
+        }
+
+        video {
+            width: 100%;
+            height: 100%;
+            object-fit: cover;
+        }
+
+        .overlay {
+            position: absolute;
+            top: 10px;
+            left: 10px;
+            background: rgba(0, 0, 0, 0.7);
+            padding: 10px;
+            border-radius: 5px;
+            font-size: 14px;
+        }
+
+        .status {
+            margin-bottom: 5px;
+        }
+
+        .status span {
+            font-weight: bold;
+        }
+
+        .verified {
+            color: #00ff00;
+        }
+
+        .failed {
+            color: #ff0000;
+        }
+
+        .pending {
+            color: #ffff00;
+        }
+
+        #controls {
+            margin-top: 20px;
+            display: flex;
+            gap: 10px;
+        }
+
+        input {
+            padding: 10px;
+            border-radius: 5px;
+            border: none;
+            width: 200px;
+        }
+
+        button {
+            padding: 10px 20px;
+            background-color: #00ffcc;
+            border: none;
+            border-radius: 5px;
+            cursor: pointer;
+            font-weight: bold;
+            color: #000;
+        }
+
+        button:hover {
+            background-color: #00cc99;
+        }
+    </style>
+</head>
+
+<body>
+    <h1>Voter Verification System</h1>
+
+    <div id="controls">
+        <input type="text" id="nicInput" placeholder="Enter Voter NIC/SLIN">
+        <button onclick="startVerification()">Start Verification</button>
+        <button onclick="registerMode()">Register New</button>
+    </div>
+
+    <div class="container">
+        <video id="video" autoplay playsinline></video>
+        <canvas id="canvas" style="display:none;"></canvas>
+        <div class="overlay">
+            <div class="status">Spoof Check: <span id="spoofStatus" class="pending">Waiting...</span></div>
+            <div class="status">Liveness: <span id="blinkStatus" class="pending">Waiting...</span></div>
+            <div class="status">Face Match: <span id="matchStatus" class="pending">Waiting...</span></div>
+            <div class="status">Final Result: <span id="finalStatus" class="pending">Waiting...</span></div>
+        </div>
+    </div>
+
+    <script>
+        const video = document.getElementById('video');
+        const canvas = document.getElementById('canvas');
+        const nicInput = document.getElementById('nicInput');
+        let isVerifying = false;
+        let isRegistering = false;
+
+        async function startCamera() {
+            try {
+                const stream = await navigator.mediaDevices.getUserMedia({ video: true });
+                video.srcObject = stream;
+            } catch (err) {
+                console.error("Error accessing webcam:", err);
+                alert("Cannot access webcam");
+            }
+        }
+
+        startCamera();
+
+        function startVerification() {
+            const nic = nicInput.value;
+            if (!nic) {
+                alert("Please enter NIC");
+                return;
+            }
+            isVerifying = true;
+            isRegistering = false;
+            document.getElementById('finalStatus').innerText = "Verifying...";
+            document.getElementById('finalStatus').className = "pending";
+            processFrame();
+        }
+
+        function registerMode() {
+            const nic = nicInput.value;
+            if (!nic) {
+                alert("Please enter NIC to register");
+                return;
+            }
+            isRegistering = true;
+            isVerifying = false;
+            captureAndRegister();
+        }
+
+        function captureAndRegister() {
+            const context = canvas.getContext('2d');
+            canvas.width = video.videoWidth;
+            canvas.height = video.videoHeight;
+            context.drawImage(video, 0, 0, canvas.width, canvas.height);
+
+            const imageData = canvas.toDataURL('image/jpeg');
+
+            fetch('/api/register_voter/', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ slin_nic: nicInput.value, name: "Unknown", image: imageData })
+            })
+                .then(res => res.json())
+                .then(data => {
+                    if (data.error) alert("Registration Failed: " + data.error);
+                    else alert("Registered Successfully!");
+                    isRegistering = false;
+                })
+                .catch(err => console.error(err));
+        }
+
+        function processFrame() {
+            if (!isVerifying) return;
+
+            const context = canvas.getContext('2d');
+            canvas.width = video.videoWidth;
+            canvas.height = video.videoHeight;
+            context.drawImage(video, 0, 0, canvas.width, canvas.height);
+
+            const imageData = canvas.toDataURL('image/jpeg');
+
+            fetch('/api/verify_voter/', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ slin_nic: nicInput.value, image: imageData })
+            })
+                .then(res => res.json())
+                .then(data => {
+                    updateUI(data);
+                    if (data.verified) {
+                        isVerifying = false; // Stop on success? Or keep checking?
+                        // alert("Verified!");
+                    } else {
+                        setTimeout(processFrame, 1000); // Check every 1s
+                    }
+                })
+                .catch(err => {
+                    console.error(err);
+                    setTimeout(processFrame, 1000);
+                });
+        }
+
+        function updateUI(data) {
+            const spoofEl = document.getElementById('spoofStatus');
+            const blinkEl = document.getElementById('blinkStatus');
+            const matchEl = document.getElementById('matchStatus');
+            const finalEl = document.getElementById('finalStatus');
+
+            spoofEl.innerText = data.spoof ? "FAKE" : "REAL";
+            spoofEl.className = data.spoof ? "failed" : "verified";
+
+            blinkEl.innerText = data.blink ? "DETECTED" : "WAITING";
+            blinkEl.className = data.blink ? "verified" : "pending";
+
+            matchEl.innerText = data.match ? "MATCHED" : "NO MATCH";
+            matchEl.className = data.match ? "verified" : "failed";
+
+            if (data.verified) {
+                finalEl.innerText = "VERIFIED USER";
+                finalEl.className = "verified";
+            } else {
+                finalEl.innerText = "NOT VERIFIED";
+                finalEl.className = "failed";
+            }
+        }
+    </script>
+</body>
+
+</html>

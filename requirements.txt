@@ -1,0 +1,11 @@
+django
+pymongo
+deepface
+tf-keras
+dnspython
+insightface
+mediapipe
+opencv-python
+numpy
+scikit-learn
+onnxruntime
