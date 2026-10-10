@@ -159,7 +159,10 @@
         </div>
         <div class="auth-links">
             <span>Poll Worker: {{ user.username }}</span>
-            <a href="/admin/logout/">🚪 Logout</a>
+            <form action="/admin/logout/" method="post" style="display:inline; margin:0; padding:0;">
+                {% csrf_token %}
+                <button type="submit" style="background:none; border:none; color:inherit; cursor:pointer; font-size:inherit; padding:0;">🚪 Logout</button>
+            </form>
         </div>
     </div>
 
@@ -180,6 +183,10 @@
             <button class="btn btn-primary" onclick="searchVoter()" style="width: 100%;">
                 🔍 Search Voter
             </button>
+            <div id="search-loading" class="loading hidden" style="margin-top: 15px;">
+                <div class="spinner"></div>
+                <p>Searching... Please wait</p>
+            </div>
             <div id="search-error" class="error hidden" style="margin-top: 15px;"></div>
         </div>
 
@@ -247,6 +254,7 @@
         async function searchVoter() {
             const nic = document.getElementById('nic-input').value.trim();
             const errorDiv = document.getElementById('search-error');
+            const loadingDiv = document.getElementById('search-loading');
 
             if (!nic) {
                 errorDiv.textContent = 'Please enter a NIC number';
@@ -255,18 +263,20 @@
             }
 
             errorDiv.classList.add('hidden');
+            loadingDiv.classList.remove('hidden');
 
             try {
                 const response = await fetch('/polling/verify-nic/', {
                     method: 'POST',
                     headers: {
                         'Content-Type': 'application/json',
-                        'X-CSRFToken': getCookie('csrftoken')
+                        'X-CSRFToken': getCookie('polling_csrftoken')
                     },
                     body: JSON.stringify({ nic })
                 });
 
                 const data = await response.json();
+                loadingDiv.classList.add('hidden');
 
                 if (response.ok) {
                     currentVoter = data.voter;
@@ -278,6 +288,7 @@
                     errorDiv.classList.remove('hidden');
                 }
             } catch (error) {
+                loadingDiv.classList.add('hidden');
                 errorDiv.textContent = 'Error searching voter';
                 errorDiv.classList.remove('hidden');
             }
@@ -345,7 +356,7 @@
                     method: 'POST',
                     headers: {
                         'Content-Type': 'application/json',
-                        'X-CSRFToken': getCookie('csrftoken')
+                        'X-CSRFToken': getCookie('polling_csrftoken')
                     },
                     body: JSON.stringify({
                         nic: currentVoter.nic,

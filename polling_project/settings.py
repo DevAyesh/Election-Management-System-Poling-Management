@@ -128,3 +128,4 @@ LOGIN_URL = '/polling/login/'
 
 CSRF_COOKIE_NAME = "polling_csrftoken"
 SESSION_COOKIE_NAME = "polling_sessionid"
+LOGOUT_REDIRECT_URL = '/'
