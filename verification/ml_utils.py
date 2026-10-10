@@ -22,7 +22,7 @@ except ImportError:
 # Try importing MediaPipe
 try:
     import mediapipe as mp
-    MEDIAPIPE_AVAILABLE = True
+    MEDIAPIPE_AVAILABLE = hasattr(mp, "solutions")
 except ImportError:
     MEDIAPIPE_AVAILABLE = False
 
@@ -31,8 +31,9 @@ class FaceVerificationSystem:
 
     def __new__(cls):
         if cls._instance is None:
-            cls._instance = super(FaceVerificationSystem, cls).__new__(cls)
-            cls._instance.initialize_models()
+            instance = super(FaceVerificationSystem, cls).__new__(cls)
+            instance.initialize_models()
+            cls._instance = instance
         return cls._instance
 
     def initialize_models(self):
@@ -49,39 +50,43 @@ class FaceVerificationSystem:
                 self.app = None
         
         if MEDIAPIPE_AVAILABLE:
-            self.mp_face_mesh = mp.solutions.face_mesh
-            self.face_mesh = self.mp_face_mesh.FaceMesh(
-                max_num_faces=1,
-                refine_landmarks=True,
-                min_detection_confidence=0.5,
-                min_tracking_confidence=0.5
-            )
-            print("MediaPipe initialized.")
+            try:
+                self.mp_face_mesh = mp.solutions.face_mesh
+                self.face_mesh = self.mp_face_mesh.FaceMesh(
+                    max_num_faces=1,
+                    refine_landmarks=True,
+                    min_detection_confidence=0.5,
+                    min_tracking_confidence=0.5
+                )
+                print("MediaPipe initialized.")
+            except Exception as e:
+                print(f"Warning: Failed to initialize MediaPipe face mesh: {e}")
+                self.face_mesh = None
 
-    def get_embedding(self, img_array):
+    def get_embedding(self, img_array, min_face_width=0):
         if INSIGHTFACE_AVAILABLE and getattr(self, 'app', None):
             faces = self.app.get(img_array)
             if not faces:
-                return None
+                return None, "NO_FACE"
             largest_face = max(faces, key=lambda x: (x.bbox[2]-x.bbox[0]) * (x.bbox[3]-x.bbox[1]))
-            return largest_face.embedding
+            if (largest_face.bbox[2] - largest_face.bbox[0]) < min_face_width:
+                return None, "TOO_SMALL"
+            return largest_face.embedding, "OK"
         
         if DEEPFACE_AVAILABLE:
             try:
                 # DeepFace.represent returns a list of dicts
-                embedding_objs = DeepFace.represent(img_array, model_name="ArcFace", enforce_detection=False)
+                embedding_objs = DeepFace.represent(img_array, model_name="ArcFace", enforce_detection=True)
                 if embedding_objs:
-                    return np.array(embedding_objs[0]["embedding"])
+                    return np.array(embedding_objs[0]["embedding"]), "OK"
+            except ValueError:
+                return None, "NO_FACE"
             except Exception as e:
                 print(f"DeepFace embedding error: {e}")
         
-        return None
+        return None, "NO_FACE"
 
-    def verify_face(self, img_array, registered_embedding, threshold=0.35):
-        live_embedding = self.get_embedding(img_array)
-        if live_embedding is None:
-            return False, 0.0
-        
+    def compare_embeddings(self, live_embedding, registered_embedding, threshold=0.35):
         # Cosine Similarity
         # Ensure shapes match
         if registered_embedding.shape != live_embedding.shape:
@@ -94,10 +99,17 @@ class FaceVerificationSystem:
         # Threshold might need adjustment based on model (ArcFace usually 0.5 is good, DeepFace default is different)
         # For ArcFace, cosine distance threshold is ~0.68, so similarity threshold is ~0.32
         print(f"DEBUG: Similarity Score: {sim}, Threshold: {threshold}")
-        return sim > threshold, sim
+        return bool(sim > threshold), float(sim)
+
+    def verify_face(self, img_array, registered_embedding, threshold=0.35):
+        live_embedding, status = self.get_embedding(img_array)
+        if status != "OK":
+            return False, 0.0
+        
+        return self.compare_embeddings(live_embedding, registered_embedding, threshold)
 
     def check_liveness(self, img_array):
-        if MEDIAPIPE_AVAILABLE and hasattr(self, 'face_mesh'):
+        if MEDIAPIPE_AVAILABLE and getattr(self, 'face_mesh', None) is not None:
             # Calculate EAR
             results = self.face_mesh.process(cv2.cvtColor(img_array, cv2.COLOR_BGR2RGB))
             if results.multi_face_landmarks:
@@ -108,7 +120,10 @@ class FaceVerificationSystem:
             return False
         
         # Fallback: Face detection implies "liveness" in simplest form (not secure)
-        # Or use OpenCV eye detector
+        if INSIGHTFACE_AVAILABLE and getattr(self, 'app', None):
+            faces = self.app.get(img_array)
+            return len(faces) > 0
+            
         return True
 
     def check_spoof(self, img_array):

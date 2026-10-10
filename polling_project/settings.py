@@ -125,3 +125,6 @@ MONGO_URI = "mongodb+srv://erandahashan0103_db_user:XvPVJzOOnHeGlett@cluster0.qv
 MONGO_DB_NAME = "Election_Management_System"
 
 LOGIN_URL = '/polling/login/'
+
+CSRF_COOKIE_NAME = "polling_csrftoken"
+SESSION_COOKIE_NAME = "polling_sessionid"

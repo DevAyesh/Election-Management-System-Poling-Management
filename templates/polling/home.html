@@ -319,14 +319,26 @@
         }
 
         async function captureAndVerify() {
-            // Capture photo
+            // Show loading
+            const loadingDiv = document.getElementById('face-loading');
+            loadingDiv.classList.remove('hidden');
+            const loadingText = loadingDiv.querySelector('p');
+            loadingText.innerText = "Capturing... please look at the camera";
+
+            // Capture photos
+            const liveImages = [];
             canvas.width = video.videoWidth;
             canvas.height = video.videoHeight;
-            ctx.drawImage(video, 0, 0);
-            const liveImage = canvas.toDataURL('image/jpeg');
+            
+            for (let i = 0; i < 5; i++) {
+                ctx.drawImage(video, 0, 0);
+                liveImages.push(canvas.toDataURL('image/jpeg', 0.92));
+                if (i < 4) {
+                    await new Promise(r => setTimeout(r, 300));
+                }
+            }
 
-            // Show loading
-            document.getElementById('face-loading').classList.remove('hidden');
+            loadingText.innerText = "Verifying face... Please wait";
 
             try {
                 const response = await fetch('/polling/verify-face/', {
@@ -337,7 +349,7 @@
                     },
                     body: JSON.stringify({
                         nic: currentVoter.nic,
-                        live_image: liveImage
+                        live_images: liveImages
                     })
                 });
 
@@ -366,12 +378,12 @@
                     </div>
                 `;
             } else {
+                const message = data.message || data.error || 'Face does not match registered photo.';
                 resultDiv.innerHTML = `
                     <div class="verification-result result-failed">
                         <div class="result-icon">❌</div>
                         <div class="result-text">NOT VERIFIED</div>
-                        <div class="confidence-score">${data.message}</div>
-                        <p style="margin-top: 20px;">Face does not match registered photo</p>
+                        <p style="margin-top: 20px; font-size: 18px;">${message}</p>
                     </div>
                 `;
             }

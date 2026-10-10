@@ -75,10 +75,14 @@ def verify_face(request):
         try:
             data = json.loads(request.body)
             nic = data.get('nic')
-            live_image = data.get('live_image')  # Base64 image from webcam
+            live_images_b64 = data.get('live_images')
+            live_image_b64 = data.get('live_image')
             
-            if not nic or not live_image:
+            if not nic or (not live_images_b64 and not live_image_b64):
                 return JsonResponse({'error': 'Missing data'}, status=400)
+            
+            if live_images_b64 is None:
+                live_images_b64 = [live_image_b64]
             
             # Get stored face image from database
             db = get_db()
@@ -97,61 +101,79 @@ def verify_face(request):
                 nparr = np.frombuffer(img_bytes, np.uint8)
                 return cv2.imdecode(nparr, cv2.IMREAD_COLOR)
 
-            live_img = decode_b64(live_image)
             stored_img = decode_b64(stored_image_b64)
 
             # Initialize ML System
             from verification.ml_utils import FaceVerificationSystem
             fv_system = FaceVerificationSystem()
+            
+            stored_embedding, status = fv_system.get_embedding(stored_img, min_face_width=0)
+            if status != "OK":
+                 return JsonResponse({'verified': False, 'message': 'No valid face detected in stored photo', 'confidence': 0})
+            
+            best_score = -1.0
+            best_match = False
+            best_spoof = False
+            best_blink = False
+            any_face_detected = False
+            any_face_too_small = False
 
-            # 1. Anti-Spoofing
-            is_spoof = fv_system.check_spoof(live_img)
-            if is_spoof:
+            for img_b64 in live_images_b64:
+                live_img = decode_b64(img_b64)
+                
+                live_embedding, status = fv_system.get_embedding(live_img, min_face_width=80)
+                if status == "TOO_SMALL":
+                    any_face_too_small = True
+                    continue
+                if status != "OK":
+                    continue
+                    
+                any_face_detected = True
+                
+                is_spoof = fv_system.check_spoof(live_img)
+                has_blinked = fv_system.check_liveness(live_img)
+                
+                is_match, score = fv_system.compare_embeddings(live_embedding, stored_embedding)
+                is_match = bool(is_match)
+                score = float(score)
+                
+                if score > best_score:
+                    best_score = score
+                    best_match = is_match
+                    best_spoof = is_spoof
+                    best_blink = has_blinked
+
+            if not any_face_detected:
+                if any_face_too_small:
+                    return JsonResponse({'verified': False, 'message': 'Face too small. Move closer to the camera.', 'confidence': 0})
+                return JsonResponse({'verified': False, 'message': 'No face detected in live camera. Look at the camera and try again.', 'confidence': 0})
+            
+            if best_spoof:
                 return JsonResponse({
                     'verified': False,
                     'message': 'Spoof detected! Please use a real face.',
                     'confidence': 0
                 })
 
-            # 2. Liveness (Blink)
-            # For single-shot verification, we might skip strict blink check or just log it
-            has_blinked = fv_system.check_liveness(live_img)
-            # If we want to enforce blink, we could fail here, but usually blink is a sequence check.
-            # We will proceed but note it.
-
-            # 3. Face Matching
-            # Generate embeddings
-            live_embedding = fv_system.get_embedding(live_img)
-            stored_embedding = fv_system.get_embedding(stored_img)
-
-            if live_embedding is None:
-                 return JsonResponse({'verified': False, 'message': 'No face detected in live camera', 'confidence': 0})
-            if stored_embedding is None:
-                 return JsonResponse({'verified': False, 'message': 'No face detected in stored photo', 'confidence': 0})
-
-            # Compare
-            is_match, score = fv_system.verify_face(live_img, stored_embedding) # verify_face calculates live embedding again, optimization possible but this is cleaner API usage if we refactor verify_face to take embedding. 
-            # Actually verify_face takes (img_array, registered_embedding). So we pass live_img and stored_embedding.
-            
             # Recalculate score for display (0 to 100)
-            confidence = round(score * 100, 2)
+            confidence = round(best_score * 100, 2)
 
             # Log verification attempt
             db.verification_logs.insert_one({
                 'nic': nic,
                 'timestamp': datetime.now(),
                 'date': datetime.now().strftime('%Y-%m-%d'),
-                'verified': is_match,
-                'spoof': is_spoof,
-                'blink': has_blinked,
+                'verified': best_match,
+                'spoof': best_spoof,
+                'blink': best_blink,
                 'confidence': confidence,
                 'poll_worker': request.user.username
             })
             
             return JsonResponse({
-                'verified': is_match,
+                'verified': best_match,
                 'confidence': confidence,
-                'message': 'Face verified successfully!' if is_match else 'Face does not match registered photo'
+                'message': 'Face verified successfully!' if best_match else 'Face does not match registered photo.'
             })
             
         except Exception as e:
@@ -159,6 +181,7 @@ def verify_face(request):
             traceback.print_exc()
             return JsonResponse({
                 'error': f'Face verification error: {str(e)}',
+                'message': 'An error occurred during face verification.',
                 'verified': False
             }, status=500)
     
